@@ -232,24 +232,72 @@ strategy_for_investment()
 
 # 4a
 import pandas as pd
+import numpy as np
 raw_data = pd.read_csv('DGS10.csv') #ensure csv file is in same directory as .py file
 raw_data['DATE'] = pd.to_datetime(raw_data['DATE'], format='%m/%d/%y')
 raw_data['IR'] = pd.to_numeric(raw_data['IR'], errors='coerce')
 # print(raw_data.head())
 clean_data = raw_data.dropna(subset=['IR'])
+clean_data = clean_data.sort_values(by='DATE').reset_index(drop=True)
 print(clean_data.head())
 
-interest_rates_pre21 = clean_data[clean_data['DATE'].dt.year < 2021]
-interest_rates_post21 = clean_data[clean_data['DATE'].dt.year >= 2021]
+# interest_rates_pre21 = clean_data[clean_data['DATE'].dt.year < 2021]
+interest_rates_pre21 = clean_data[clean_data['DATE'].dt.year < 2021].copy()
+interest_rates_post21 = clean_data[clean_data['DATE'].dt.year >= 2021].copy()
 
 # OLS (Linear Regression) Form: 𝑟𝑡 − 𝑟𝑡−1 = 𝑎𝑏 − 𝑎𝑟𝑡−1 + 𝜀𝑡 (0, 𝜎2)
 
+interest_rates_pre21['Delta'] = interest_rates_pre21['IR'].diff()
+interest_rates_pre21['Lag'] = interest_rates_pre21['IR'].shift(1)
+
+interest_rates_pre21 = interest_rates_pre21.dropna(subset=['Delta', 'Lag']).reset_index(drop=True)
+print(interest_rates_pre21)
 # interest_rates_pre21['Delta'] = interest_rates_pre21['IR'].diff()
+# interest_rates_pre21.loc[:, 'Delta'] = interest_rates_pre21['IR'].diff()
+# interest_rates_pre21.loc[:, 'Lag'] = interest_rates_pre21['IR'].shift(1)
 # interest_rates_pre21['Lag'] = interest_rates_pre21['IR'].shift(1)
 
-print(interest_rates_pre21.head())
+# interest_rates_pre21 = interest_rates_pre21.dropna()
+# interest_rates_pre21 = interest_rates_pre21.dropna(subset=['Delta', 'Lag']).reset_index(drop=True)
+# print(interest_rates_pre21)
+#
+X = interest_rates_pre21['Lag']
+Y = interest_rates_pre21['Delta']
+mean_X = X.mean()
+mean_Y = Y.mean()
+cov_XY = np.sum((X - mean_X) * (Y - mean_Y))
+var_X = np.sum((X - mean_X) ** 2)
+
+a = cov_XY / var_X
+b = mean_Y - a * mean_X
+
+residuals = Y - (a * X + b)
+sigma = np.sqrt(np.sum(residuals ** 2) / len(residuals))
+print(f'Calibrated Parameters: a = {a}, b = {b}, σ = {sigma}')
 
 #4b
+forecasted_values = []
+forecasted_volatility = []
 
+
+for i, row in interest_rates_post21.iterrows():
+    lag_value = row['IR']
+    forecasted_value = a * (b - lag_value) + lag_value
+    forecasted_values.append(forecasted_value)
+    forecasted_volatility.append(sigma)
+
+interest_rates_post21['Forecasted_IR'] = forecasted_values
+interest_rates_post21['Forecasted_Volatility'] = forecasted_volatility
+print(interest_rates_post21[['DATE', 'IR', 'Forecasted_IR', 'Forecasted_Volatility']])
 
 #4c
+interest_rates_post21['Forecasted_IR'] = forecasted_values
+interest_rates_post21['Actual_IR'] = interest_rates_post21['IR']
+
+mse = np.mean((interest_rates_post21['Forecasted_IR'] - interest_rates_post21['Actual_IR']) ** 2)
+ss_total = np.sum((interest_rates_post21['Actual_IR'] - interest_rates_post21['Actual_IR'].mean()) ** 2)
+ss_residual = np.sum((interest_rates_post21['Forecasted_IR'] - interest_rates_post21['Actual_IR']) ** 2)
+r_squared = 1 - (ss_residual / ss_total)
+
+print(f'Mean Squared Error (MSE): {mse}')
+print(f'R-squared (R²): {r_squared}')
